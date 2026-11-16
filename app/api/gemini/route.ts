@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
   try {
     const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.5-flash-lite',
       safetySettings: [
         {
           category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,

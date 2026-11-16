@@ -11,6 +11,11 @@ type AIMessage = {
   content: string
   timestamp: number
 }
+type AIResponse = {
+  message: string
+  action?: string
+  params?: any
+}
 
 // Define navigation commands and their corresponding section IDs
 const VOICE_COMMANDS: Record<string, string> = {
@@ -90,6 +95,33 @@ const ACTION_COMMANDS: Record<string, string> = {
   'view more': 'viewMore',
   'close': 'closeModal',
   'back': 'closeModal',
+}
+
+const getDirectNavigationResponse = (command: string): AIResponse | null => {
+  const normalizedCommand = command.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  const asksToNavigate = /\b(go|navigate|take|bring|show|open|view|see|visit|jump)\b/.test(normalizedCommand)
+  const sections = [
+    { section: 'home', names: /\b(home|homepage|start page)\b/, bare: /^(go\s+)?(to\s+)?(the\s+)?(home|homepage|start page)$/ },
+    { section: 'about', names: /\babout\b/, bare: /^(go\s+)?(to\s+)?(the\s+)?about(\s+me)?$/ },
+    { section: 'skills', names: /\bskills?\b/, bare: /^(go\s+)?(to\s+)?(my\s+)?skills?$/ },
+    { section: 'projects', names: /\b(projects?|my work|portfolio)\b/, bare: /^(go\s+)?(to\s+)?(my\s+)?(projects?|work|portfolio)$/ },
+    { section: 'blog', names: /\bblog\b/, bare: /^(go\s+)?(to\s+)?(the\s+)?blog$/ },
+    { section: 'contact', names: /\bcontact\b/, bare: /^(go\s+)?(to\s+)?(the\s+)?contact(\s+me)?$/ },
+  ]
+
+  const section = sections.find(({ names, bare }) =>
+    names.test(normalizedCommand) && (asksToNavigate || bare.test(normalizedCommand))
+  )
+
+  if (section) {
+    return {
+      message: `Taking you to the ${section.section} section.`,
+      action: 'navigate',
+      params: { section: section.section },
+    }
+  }
+
+  return null
 }
 
 const VoiceNavigation = () => {
@@ -298,7 +330,8 @@ const VoiceNavigation = () => {
               setIsListening(false)
               setErrorMessage('Speech recognition could not reach the browser service. Check your internet connection and try again.')
             } else if (event.error === 'no-speech') {
-              setErrorMessage('No speech detected. Please try again.')
+              setDebugInfo('No speech detected. Check the selected microphone and speak after listening starts.')
+              setErrorMessage('No speech was picked up. Check that the selected microphone works, then speak clearly after listening starts.')
               setTimeout(() => {
                 setErrorMessage(null)
               }, 3000)
@@ -343,7 +376,7 @@ const VoiceNavigation = () => {
   }, [checkMicrophonePermission])
 
   // Setup speech recognition - modified to always use AI interpretation
-  const startListening = useCallback(async () => {
+  const startListening = useCallback(() => {
     if (!isClient || !isBrowserSupported) {
       setDebugInfo('Cannot start: client or browser not supported')
       return
@@ -351,13 +384,10 @@ const VoiceNavigation = () => {
     
     setDebugInfo('Starting AI speech recognition in continuous mode...')
     
-    // Check/request microphone permission first
-    if (permissionStatus !== 'granted') {
-      const granted = await requestMicrophoneAccess()
-      if (!granted) {
-        setDebugInfo('Mic permission denied, cannot start')
-        return
-      }
+    if (permissionStatus === 'denied') {
+      setDebugInfo('Mic permission denied, cannot start')
+      setErrorMessage('Microphone access is blocked. Allow it in the site controls beside the address bar, then retry.')
+      return
     }
     
     // Now we can start recognition
@@ -412,7 +442,7 @@ const VoiceNavigation = () => {
         setErrorMessage('Failed to start speech recognition. Please try again.')
       }
     }
-  }, [isClient, isBrowserSupported, permissionStatus, requestMicrophoneAccess])
+  }, [isClient, isBrowserSupported, permissionStatus])
 
   const stopListening = useCallback(() => {
     if (!isClient || !isBrowserSupported || !recognitionRef.current) {
@@ -860,11 +890,14 @@ const VoiceNavigation = () => {
     setAIState('thinking')
     
     try {
-      // Delay to simulate thinking time (would be real API call in production)
-      await new Promise(resolve => setTimeout(resolve, 1200))
-      
-      // Process the command and generate a response
-      let response = await generateAIResponse(command)
+      const directResponse = getDirectNavigationResponse(command)
+      let response: AIResponse
+      if (directResponse) {
+        response = directResponse
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 1200))
+        response = await generateAIResponse(command)
+      }
       
       // Show the AI response in a notification
       setRecognizedCommand(response.message)
@@ -898,7 +931,7 @@ const VoiceNavigation = () => {
   }
   
   // Simulate AI response generation - modified to use Gemini when available
-  const generateAIResponse = async (command: string): Promise<{message: string, action?: string, params?: any}> => {
+  const generateAIResponse = async (command: string): Promise<AIResponse> => {
     // Convert command to lowercase for easier matching
     const lowerCommand = command.toLowerCase()
     
@@ -1320,9 +1353,15 @@ Keep responses concise and focused on helping the user navigate and interact wit
         }
       }
     } catch (error) {
-      console.error("Error in generateAIResponse:", error);
+      console.warn(
+        'Gemini is unavailable; voice navigation will use local responses.',
+        error instanceof Error ? error.message : 'Unknown error'
+      )
+      setGeminiAvailable(false)
+      setFallbackMode(true)
+      setDebugInfo('Gemini unavailable - using fallback mode')
       return {
-        message: "I'm having trouble processing that request right now. Could you try again?"
+        message: "Gemini is temporarily unavailable. You can still say 'go to home', 'go to projects', or another section."
       };
     }
     
