@@ -4,9 +4,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { FiMic, FiMicOff, FiAlertTriangle, FiMessageSquare, FiSend } from 'react-icons/fi'
 
-// Import Google Generative AI
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai'
-
 // Define AI agent states
 type AIAgentState = 'inactive' | 'listening' | 'thinking' | 'speaking'
 type AIMessage = {
@@ -95,48 +92,6 @@ const ACTION_COMMANDS: Record<string, string> = {
   'back': 'closeModal',
 }
 
-// Initialize Google Generative AI
-const initializeGeminiAI = () => {
-  if (typeof window !== 'undefined') {
-    // This can be replaced with environment variable in production
-    // For demo purposes, you can hardcode your API key here, but make sure to use environment variables in production
-    const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-    
-    try {
-      const genAI = new GoogleGenerativeAI(API_KEY)
-      
-      // Create a model instance
-      const geminiModel = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash', // or 'gemini-pro' depending on your needs
-        safetySettings: [
-          {
-            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-          },
-        ],
-      })
-      
-      return geminiModel
-    } catch (error) {
-      console.error("Failed to initialize Gemini AI:", error)
-      return null
-    }
-  }
-  return null
-}
-
 const VoiceNavigation = () => {
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState('')
@@ -160,7 +115,7 @@ const VoiceNavigation = () => {
   // Track whether we want to maintain continuous listening
   const continuousListeningRef = useRef<boolean>(false)
   
-  const [geminiModel, setGeminiModel] = useState<any>(null)
+  const [geminiAvailable, setGeminiAvailable] = useState(false)
   const [fallbackMode, setFallbackMode] = useState<boolean>(false)
   
   // Function to check microphone permission status
@@ -949,37 +904,8 @@ const VoiceNavigation = () => {
     
     try {
       // If Gemini is available, use it for natural language processing
-      if (geminiModel && !fallbackMode) {
+      if (geminiAvailable && !fallbackMode) {
         setDebugInfo(`Using Gemini AI to process: "${command}"`)
-        
-        // Create a chat session to keep context
-        // This includes portfolio context and action instructions
-        const chat = geminiModel.startChat({
-          history: [
-            {
-              role: "user",
-              parts: [{ text: "You are an AI assistant for Piyas Sarkar's portfolio website." }],
-            },
-            {
-              role: "model",
-              parts: [{ text: "I'll help visitors navigate and explore Piyas Sarkar's portfolio. What would you like to know?" }],
-            },
-            {
-              role: "user", 
-              parts: [{ text: "Here are the sections available: Home, About, Skills, Projects, Blog, and Contact. The project section features RESQNET, Wayfarer, THREATLENS, GRoute, and Carpooling. You'll need to recognize user intent and provide specific JSON structured responses." }],
-            },
-            {
-              role: "model",
-              parts: [{ text: "I understand. I'll help visitors navigate through the sections of Piyas Sarkar's portfolio and provide information about his projects. I'll structure my responses accordingly and recognize user intents." }],
-            }
-          ],
-          generationConfig: {
-            temperature: 0.4,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1000,
-          },
-        });
         
         // Enhanced prompt that includes UI interaction capabilities
         const aiPrompt = `
@@ -1017,10 +943,22 @@ Only include "action" and "params" if an action should be taken based on the com
 Keep responses concise and focused on helping the user navigate and interact with the portfolio.
 `;
 
-        // Send the prompt to Gemini
-        const result = await chat.sendMessage(aiPrompt);
-        const response = await result.response;
-        const responseText = response.text();
+        const apiResponse = await fetch('/api/gemini', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: aiPrompt }),
+        })
+        const result: unknown = await apiResponse.json()
+        if (
+          !apiResponse.ok ||
+          typeof result !== 'object' ||
+          result === null ||
+          !('text' in result) ||
+          typeof result.text !== 'string'
+        ) {
+          throw new Error(`Gemini API request failed (${apiResponse.status})`)
+        }
+        const responseText = result.text
         
         setDebugInfo(`Gemini response: ${responseText.substring(0, 100)}...`)
         
@@ -1530,35 +1468,61 @@ Keep responses concise and focused on helping the user navigate and interact wit
     }
   }
 
-  // Initialize Gemini AI on client side
+  // Check whether the server has Gemini configured without exposing its key.
   useEffect(() => {
-    if (isClient) {
-      const model = initializeGeminiAI()
-      setGeminiModel(model)
-      setFallbackMode(!model) // Set fallback mode if Gemini couldn't be initialized
-      
-      if (!model) {
-        console.warn("Gemini AI couldn't be initialized. Falling back to rule-based system.")
-        setDebugInfo("Gemini unavailable - using fallback mode")
-      } else {
-        setDebugInfo("Gemini AI initialized successfully")
+    if (!isClient) return
+
+    let active = true
+    const checkGeminiAvailability = async () => {
+      try {
+        const response = await fetch('/api/gemini', { cache: 'no-store' })
+        const result: unknown = await response.json()
+        if (
+          !response.ok ||
+          typeof result !== 'object' ||
+          result === null ||
+          !('available' in result) ||
+          typeof result.available !== 'boolean'
+        ) {
+          throw new Error(`Gemini availability check failed (${response.status})`)
+        }
+
+        if (!active) return
+        setGeminiAvailable(result.available)
+        setFallbackMode(!result.available)
+        if (result.available) {
+          setDebugInfo('Gemini AI is ready')
+        } else {
+          setErrorMessage('Gemini is not configured. Add GEMINI_API_KEY to the server environment.')
+          setDebugInfo('Gemini unavailable - using fallback mode')
+        }
+      } catch (error) {
+        console.error('Failed to check Gemini availability:', error)
+        if (!active) return
+        setGeminiAvailable(false)
+        setFallbackMode(true)
+        setErrorMessage('Gemini is unavailable. Using fallback responses.')
+        setDebugInfo('Gemini unavailable - using fallback mode')
       }
+    }
+
+    void checkGeminiAvailability()
+    return () => {
+      active = false
     }
   }, [isClient])
 
   // Add a function to toggle fallback mode for testing purposes
   const toggleFallbackMode = () => {
+    if (!geminiAvailable) {
+      setFallbackMode(true)
+      setDebugInfo('Gemini unavailable - using fallback mode')
+      return
+    }
+
     setFallbackMode(prev => !prev)
     setDebugInfo(`Fallback mode ${!fallbackMode ? 'enabled' : 'disabled'}`)
   }
-
-  // Add API key notification if not found
-  useEffect(() => {
-    if (isClient && !process.env.NEXT_PUBLIC_GEMINI_API_KEY && !fallbackMode) {
-      setErrorMessage("Gemini API key not found. Please add your API key to the environment variables.")
-      setFallbackMode(true)
-    }
-  }, [isClient, fallbackMode])
 
   // New helper function to find any UI element based on description
   const findUIElement = (description: string): HTMLElement | null => {

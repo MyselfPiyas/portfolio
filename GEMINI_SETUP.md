@@ -1,6 +1,6 @@
 # Setting Up Google's Gemini AI in Your Portfolio
 
-This portfolio now includes integration with Google's Gemini AI model, providing advanced natural language understanding for the voice and chat assistant.
+The voice assistant sends Gemini requests through the server-side `/api/gemini` route. The API key stays on the server and is not sent to visitors' browsers.
 
 ## Getting Started with Gemini
 
@@ -8,28 +8,34 @@ This portfolio now includes integration with Google's Gemini AI model, providing
 
 1. Visit [Google AI Studio](https://ai.google.dev/) and sign in with your Google account
 2. Navigate to the "Get API Key" section
-3. Either create a new API key or use an existing one
-4. Copy the API key
+3. Create a new API key. The previous key was exposed and should be revoked.
 
-### 2. Add Your API Key to the Project
+### 2. Add Your API Key for Local Development
 
-1. Open the `.env.local` file in the root directory
-2. Add your API key to the `NEXT_PUBLIC_GEMINI_API_KEY` variable:
+1. Open `.env.local` in the project root (create it if it does not exist).
+2. Add your new key without a `NEXT_PUBLIC_` prefix:
    ```
-   NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here
+   GEMINI_API_KEY=your_new_key_here
    ```
-   Note: `NEXT_PUBLIC_` variables are included in browser code. Do not use this approach for a production secret; call Gemini through a server-side route and keep the key in a non-public environment variable instead.
-3. Save the file
-4. Restart your development server if it's running
+3. Save the file and restart the development server.
 
-### 3. Testing the Integration
+`.env.local` is ignored by Git. Never commit it or share the key in source code.
 
-1. Run your development server
-2. Open the portfolio in your browser
-3. Use the microphone button or chat interface
-4. Check the debug panel (Ctrl+Alt+D) to see if Gemini is active
+### 3. Add Your API Key to Vercel
 
-If Gemini couldn't initialize (due to an invalid or missing API key), the system will automatically fall back to the rule-based response system.
+1. Open the project in the [Vercel dashboard](https://vercel.com/dashboard).
+2. Go to **Settings → Environment Variables**.
+3. Add a variable named `GEMINI_API_KEY` and paste your new key as its value.
+4. Select **Production** (and **Preview** if you want Gemini on preview deployments), then save.
+5. Redeploy the project so the new variable is available.
+
+### 4. Testing the Integration
+
+1. Open the portfolio in your browser.
+2. Use the microphone button or chat interface.
+3. Check the debug panel (Ctrl+Alt+D) to see whether Gemini is active.
+
+If the key is missing or Gemini is unavailable, the assistant uses its rule-based fallback responses.
 
 ## Customizing Gemini Behavior
 
@@ -44,9 +50,8 @@ You can customize the Gemini AI behavior by modifying the following files:
 If you encounter issues with Gemini integration:
 
 1. **API Key Issues**:
-
-   - Make sure your API key is correctly added to the `.env.local` file
-   - Check that the API key is active and has not reached request limits
+   - Verify `GEMINI_API_KEY` is set in `.env.local` for local development or in Vercel's Environment Variables for deployment.
+   - After changing a Vercel variable, redeploy the project.
 
 2. **Fallback Mode**:
 
